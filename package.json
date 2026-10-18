@@ -1,0 +1,52 @@
+{
+  "name": "@ohnejs/pg",
+  "version": "0.1.0",
+  "description": "Postgres for the ohne database.",
+  "homepage": "https://ohne.dev/docs/database/engine#postgres",
+  "license": "MIT",
+  "author": "Muris Ceman <muris@ohne.dev>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ohnejs/pg.git"
+  },
+  "files": [
+    "boot",
+    "src",
+    "ohne.config.ts"
+  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "format": "oxfmt",
+    "lint": "oxlint",
+    "test": "NODE_COMPILE_CACHE=node_modules/.cache/node-compile node --test --expose-gc --test-global-setup=tests/_setup.ts --import ohnejs/register \"tests/**/*.test.ts\"",
+    "test:core": "cd ../ohne && OHNE_TEST_DIALECT=$INIT_CWD/tests/_core-dialect.ts NODE_COMPILE_CACHE=node_modules/.cache/node-compile node --test --test-timeout=120000 --test-global-setup=$INIT_CWD/tests/_setup.ts \"tests/**/*.test.ts\"",
+    "typecheck": "tsc"
+  },
+  "dependencies": {
+    "pg": "8.23.1"
+  },
+  "devDependencies": {
+    "@types/node": "26.0.0",
+    "@types/pg": "8.23.1",
+    "ohnejs": "0.1.0",
+    "oxfmt": "0.55.0",
+    "oxlint": "1.70.0",
+    "typescript": "7.0.2"
+  },
+  "peerDependencies": {
+    "ohnejs": ">=0.1.0 <0.2.0-0"
+  },
+  "engines": {
+    "node": ">=26.0.0"
+  },
+  "packageManager": "pnpm@11.5.1"
+}
