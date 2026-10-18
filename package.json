@@ -37,13 +37,13 @@
   "devDependencies": {
     "@types/node": "26.0.0",
     "@types/pg": "8.23.1",
-    "ohnejs": "0.1.0",
+    "ohnejs": "0.2.0",
     "oxfmt": "0.55.0",
     "oxlint": "1.70.0",
     "typescript": "7.0.2"
   },
   "peerDependencies": {
-    "ohnejs": ">=0.1.0 <0.2.0-0"
+    "ohnejs": ">=0.1.0 <0.3.0-0"
   },
   "engines": {
     "node": ">=26.0.0"
