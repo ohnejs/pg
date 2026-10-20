@@ -50,6 +50,8 @@ const BEGIN_IMMEDIATE =
  * That wait answers busy whatever `statement_timeout` the session sets.
  * The timeout still bounds every statement after it.
  * Transactions pin `READ COMMITTED`, so each statement after that lock reads the rows committed before it.
+ * One adapter queues its `immediate` transactions in-process first, so a waiting writer holds no client.
+ * One opened inside an open transaction skips that queue, which its outer transaction may hold.
  * A swallowed statement error aborts the transaction, and the commit then rejects with SQLSTATE `25P02`.
  * A statement the server refuses rejects with `pg`'s `DatabaseError`, carrying its SQLSTATE in `code`.
  *
@@ -66,6 +68,7 @@ const BEGIN_IMMEDIATE =
 export function createAdapter(pool: Pool): DatabaseAdapter {
   const flow = new AsyncLocalStorage<Open>();
   const inFlight = new Set<Promise<unknown>>();
+  const writers = createMutex();
   let closed = false;
 
   pool.on('error', ignore);
@@ -147,7 +150,7 @@ export function createAdapter(pool: Pool): DatabaseAdapter {
       return (await adapter.query<T>(sql, params))[0];
     },
     transaction(fn, mode = 'deferred') {
-      return track(async () => {
+      const transact = async () => {
         const client = await pool.connect();
         const open: Open = { client, turn: createMutex() };
         const { exec, run, query, queryOne } = adapter;
@@ -170,7 +173,12 @@ export function createAdapter(pool: Pool): DatabaseAdapter {
         }
         if ((await end('COMMIT')) !== 'COMMIT') throw abortedError();
         return result;
-      });
+      };
+      return track(
+        mode === 'immediate' && isUndefined(flow.getStore()?.client)
+          ? () => writers(transact)
+          : transact,
+      );
     },
     async close() {
       if (closed) throw closedError();

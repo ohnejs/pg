@@ -11,12 +11,17 @@ import { typeParsers } from '../src/types.ts';
 import { freshSchemaURL } from './_postgres.ts';
 
 /**
+ * Opens an adapter on a pool of its own over `url`.
+ */
+function open(url: string, config: PoolConfig = {}): DatabaseAdapter {
+  return createAdapter(new Pool({ connectionString: url, types: typeParsers, ...config }));
+}
+
+/**
  * Opens an adapter on a pool of its own over a fresh schema.
  */
 async function connect(config: PoolConfig = {}): Promise<DatabaseAdapter> {
-  return createAdapter(
-    new Pool({ connectionString: await freshSchemaURL(), types: typeParsers, ...config }),
-  );
+  return open(await freshSchemaURL(), config);
 }
 
 /**
@@ -226,41 +231,101 @@ describe('createAdapter', () => {
     });
 
     it('serializes two `immediate` check-then-insert transactions', async () => {
-      const insertOnce = () =>
-        db.transaction(async (tx) => {
-          const { n } = (await tx.queryOne<{ n: number }>(
-            'SELECT count(*) AS "n" FROM "t" WHERE "n" = 9',
-          ))!;
-          await sleep(50);
-          if (n === 0) await tx.run('INSERT INTO "t" VALUES (?, 9)', [crypto.randomUUID()]);
-        }, 'immediate');
-      await Promise.all([insertOnce(), insertOnce()]);
-      strictEqual((await db.queryOne<{ n: number }>('SELECT count(*) AS "n" FROM "t"'))!.n, 1);
-      await db.run('DELETE FROM "t"');
+      const url = await freshSchemaURL();
+      const a = open(url);
+      const b = open(url);
+      try {
+        await a.exec('CREATE TABLE "t" ("k" TEXT PRIMARY KEY, "n" BIGINT)');
+        const insertOnce = (writer: DatabaseAdapter) =>
+          writer.transaction(async (tx) => {
+            const { n } = (await tx.queryOne<{ n: number }>(
+              'SELECT count(*) AS "n" FROM "t" WHERE "n" = 9',
+            ))!;
+            await sleep(50);
+            if (n === 0) await tx.run('INSERT INTO "t" VALUES (?, 9)', [crypto.randomUUID()]);
+          }, 'immediate');
+        await Promise.all([insertOnce(a), insertOnce(b)]);
+        strictEqual((await a.queryOne<{ n: number }>('SELECT count(*) AS "n" FROM "t"'))!.n, 1);
+      } finally {
+        await a.close();
+        await b.close();
+      }
     });
 
     it('serializes `immediate` writers on a server that defaults to `repeatable read`', async () => {
-      const pool = new Pool({ connectionString: await freshSchemaURL(), types: typeParsers });
-      pool.on('connect', (client) => {
-        client.query("SET default_transaction_isolation = 'repeatable read'").catch(() => {});
+      const url = await freshSchemaURL();
+      const writers = Array.from({ length: 3 }, () => {
+        const pool = new Pool({ connectionString: url, types: typeParsers });
+        pool.on('connect', (client) => {
+          client.query("SET default_transaction_isolation = 'repeatable read'").catch(() => {});
+        });
+        return createAdapter(pool);
       });
-      const rr = createAdapter(pool);
       try {
-        await rr.exec('CREATE TABLE "seq" ("n" BIGINT)');
-        const next = () =>
+        await writers[0]!.exec('CREATE TABLE "seq" ("n" BIGINT)');
+        const next = (rr: DatabaseAdapter) =>
           rr.transaction(async (tx) => {
             const { n } = (await tx.queryOne<{ n: number }>('SELECT count(*) AS "n" FROM "seq"'))!;
             await sleep(50);
             await tx.run('INSERT INTO "seq" VALUES (?)', [n + 1]);
           }, 'immediate');
-        await Promise.all([next(), next(), next()]);
-        const rows = await rr.query<{ n: number }>('SELECT "n" FROM "seq" ORDER BY "n"');
+        await Promise.all(writers.map(next));
+        const rows = await writers[0]!.query<{ n: number }>('SELECT "n" FROM "seq" ORDER BY "n"');
         deepStrictEqual(
           rows.map(({ n }) => n),
           [1, 2, 3],
         );
       } finally {
-        await rr.close();
+        for (const rr of writers) await rr.close();
+      }
+    });
+
+    it('queues `immediate` writers before they take a client, so a read still gets one', async () => {
+      const pair = await connect({ max: 2 });
+      const locked = gate();
+      const held = gate();
+      try {
+        const first = pair.transaction(async () => {
+          locked.open();
+          await held.opened;
+          return 1;
+        }, 'immediate');
+        await locked.opened;
+        const queued = [2, 3].map((n) => pair.transaction(async () => n, 'immediate'));
+        strictEqual((await pair.queryOne<{ n: number }>('SELECT 7 AS "n"'))!.n, 7);
+        held.open();
+        deepStrictEqual(await Promise.all([first, ...queued]), [1, 2, 3]);
+      } finally {
+        held.open();
+        await pair.close();
+      }
+    });
+
+    it('queues an `immediate` started by work its transaction left running', async () => {
+      const pool = new Pool({ connectionString: await freshSchemaURL(), types: typeParsers });
+      const own = createAdapter(pool);
+      const started = gate();
+      const locked = gate();
+      const held = gate();
+      try {
+        let stray: Promise<number> | undefined;
+        await own.transaction(async () => {
+          stray = started.opened.then(() => own.transaction(async () => 5, 'immediate'));
+        }, 'immediate');
+        const next = own.transaction(async () => {
+          locked.open();
+          await held.opened;
+        }, 'immediate');
+        await locked.opened;
+        started.open();
+        await started.opened;
+        strictEqual(pool.totalCount, 1);
+        held.open();
+        await next;
+        strictEqual(await stray, 5);
+      } finally {
+        held.open();
+        await own.close();
       }
     });
 
@@ -379,9 +444,8 @@ describe('createAdapter', () => {
         'options',
         `${url.searchParams.get('options')} -c statement_timeout=300`,
       );
-      const pair = createAdapter(
-        new Pool({ connectionString: url.href, types: typeParsers, max: 2 }),
-      );
+      const pair = open(url.href);
+      const other = open(url.href);
       try {
         const locked = gate();
         const held = gate();
@@ -390,7 +454,7 @@ describe('createAdapter', () => {
           await held.opened;
         }, 'immediate');
         await locked.opened;
-        const second = pair.transaction(
+        const second = other.transaction(
           async (tx) =>
             (await tx.queryOne<{ statement_timeout: string }>('SHOW statement_timeout'))!,
           'immediate',
@@ -405,6 +469,7 @@ describe('createAdapter', () => {
         );
       } finally {
         await pair.close();
+        await other.close();
       }
     });
   });
