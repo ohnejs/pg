@@ -9,7 +9,7 @@ import type {
   TableDiff,
   TableSchema,
   Transaction,
-  UniqueViolationTarget,
+  IndexViolationTarget,
 } from 'ohnejs';
 import type { PoolConfig } from 'pg';
 
@@ -35,6 +35,7 @@ import {
   FOREIGN_KEY_VIOLATION,
   INSUFFICIENT_PRIVILEGE,
   LOCK_NOT_AVAILABLE,
+  PROGRAM_LIMIT_EXCEEDED,
   SERIALIZATION_FAILURE,
   UNIQUE_VIOLATION,
   constraintColumns,
@@ -304,13 +305,20 @@ export class PostgresDialect extends Dialect {
   }
 
   /**
-   * Reads the target back from the violated index's name, never from the localized message.
-   * A primary key or a hash-truncated index name gives `null`.
+   * Reads the target back from the failed index's name, never from the localized message.
+   * A primary key, a hash-truncated index name, or a row over a page names none, so it gives `null`.
    */
-  uniqueViolationTarget(error: unknown): UniqueViolationTarget | null {
+  indexViolationTarget(error: unknown): IndexViolationTarget | null {
     const columns = constraintColumns(error);
     if (isNull(columns) || !isObject(error) || !isString(error.table)) return null;
     return { table: error.table, columns };
+  }
+
+  /**
+   * Classifies a value too large for a btree entry, about 2.7 kB, or an index row over 8191 bytes.
+   */
+  isIndexOverflow(error: unknown): boolean {
+    return sqlstateOf(error) === PROGRAM_LIMIT_EXCEEDED;
   }
 
   /**

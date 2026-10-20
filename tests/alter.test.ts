@@ -6,8 +6,10 @@ import type {
   TableSchema,
 } from 'ohnejs';
 
-import { deepStrictEqual } from 'node:assert/strict';
+import { deepStrictEqual, ok, rejects, strictEqual } from 'node:assert/strict';
+import { randomBytes } from 'node:crypto';
 import { after, before, describe, test } from 'node:test';
+import { isOhneError } from 'ohnejs';
 import { truncateWithHash } from 'ohnejs/utils/crypto';
 
 import { alterTable, createTable, dropTable, renameTable } from '../src/alter.ts';
@@ -400,6 +402,25 @@ describe('schema changes', () => {
       [63, true, true],
     );
     await dropTable(db, dialect, name);
+  });
+
+  test('an index over a value too large for it fails the sync as one framework error', async () => {
+    const live = root('Logs', { columns: [text('body')] });
+    await createTable(db, dialect, live);
+    await db.run('INSERT INTO "Logs" VALUES (?, ?)', ['l1', randomBytes(3000).toString('base64')]);
+    const desired = root('Logs', {
+      columns: [text('body')],
+      indexes: [{ name: 'IX__Logs__body', columns: ['body'] }],
+    });
+    await rejects(
+      alterTable(db, dialect, alter(live, desired, { addIndexes: desired.indexes })),
+      (error) => {
+        ok(isOhneError(error));
+        strictEqual(error.title, 'Index `IX__Logs__body` cannot hold a stored value');
+        return true;
+      },
+    );
+    await dropTable(db, dialect, 'Logs');
   });
 
   test('a primary-key change drops the live key and adds the desired one by name', async () => {

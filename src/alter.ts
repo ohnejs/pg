@@ -8,10 +8,11 @@ import type {
   Transaction,
 } from 'ohnejs';
 
-import { foreignKeyName, primaryKeyName } from 'ohnejs';
+import { foreignKeyName, ohneError, primaryKeyName } from 'ohnejs';
 import { isUndefined } from 'ohnejs/utils';
 
 import { foreignKeyConstraints, tableOID } from './catalog.ts';
+import { PROGRAM_LIMIT_EXCEEDED, sqlstateOf } from './errors.ts';
 import {
   addForeignKey,
   canReference,
@@ -174,11 +175,22 @@ async function createIndexes(
   /**
    * Creates `index` as a `kind` index on `table`.
    */
-  const create = (kind: string, index: IndexSchema) => {
+  const create = async (kind: string, index: IndexSchema) => {
     const columns = index.columns.map((column) => `${dialect.quote(column)} NULLS FIRST`);
-    return db.exec(
-      `CREATE ${kind} ${dialect.quote(index.name)} ON ${dialect.quote(table)} (${columns.join(', ')})`,
-    );
+    try {
+      await db.exec(
+        `CREATE ${kind} ${dialect.quote(index.name)} ON ${dialect.quote(table)} (${columns.join(', ')})`,
+      );
+    } catch (error) {
+      if (sqlstateOf(error) !== PROGRAM_LIMIT_EXCEEDED) throw error;
+      throw ohneError({
+        title: `Index \`${index.name}\` cannot hold a stored value`,
+        body: [
+          `A row of \`${table}\` holds a value in \`${index.columns.join('`, `')}\` too large for a Postgres index entry.`,
+          'Shorten the stored values, or drop `index` or `unique` from the field.',
+        ],
+      });
+    }
   };
   for (const unique of uniques) await create('UNIQUE INDEX', unique);
   for (const index of indexes) await create('INDEX', index);

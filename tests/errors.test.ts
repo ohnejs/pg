@@ -54,6 +54,12 @@ describe('constraintColumns', () => {
     ]);
   });
 
+  it('reads the columns of a plain index too', () => {
+    deepStrictEqual(constraintColumns({ table: 'Posts', constraint: 'IX__Posts__title' }), [
+      'title',
+    ]);
+  });
+
   it('reads several field columns in order', () => {
     deepStrictEqual(
       constraintColumns({ table: 'Posts', constraint: 'UX__Posts__slug_author_category' }),
@@ -97,7 +103,6 @@ describe('constraintColumns', () => {
   it('gives null for a name that does not rebuild', () => {
     strictEqual(constraintColumns({ table: 'Posts', constraint: 'UX__Posts__' }), null);
     strictEqual(constraintColumns({ table: 'Posts', constraint: 'UX__Posts__slug_' }), null);
-    strictEqual(constraintColumns({ table: 'Posts', constraint: 'IX__Posts__slug' }), null);
   });
 
   it('gives null without a table or a constraint', () => {

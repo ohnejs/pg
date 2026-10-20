@@ -3,6 +3,7 @@ import type { DatabaseAdapter, SQLParams } from 'ohnejs';
 import type { PoolConfig } from 'pg';
 
 import { deepStrictEqual, ok, rejects, strictEqual } from 'node:assert';
+import { randomBytes } from 'node:crypto';
 import { createServer } from 'node:net';
 import { after, before, describe, it } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -341,13 +342,43 @@ describe('PostgresDialect', () => {
         db.run('INSERT INTO "Users" VALUES (?, ?)', ['u2', 'thrall@horde']),
       );
       ok(dialect.isUniqueViolation(duplicate));
-      deepStrictEqual(dialect.uniqueViolationTarget(duplicate), {
+      deepStrictEqual(dialect.indexViolationTarget(duplicate), {
         table: 'Users',
         columns: ['email'],
       });
       const key = await rejection(db.run('INSERT INTO "Users" VALUES (?, ?)', ['u1', 'x']));
       ok(dialect.isUniqueViolation(key));
-      strictEqual(dialect.uniqueViolationTarget(key), null);
+      strictEqual(dialect.indexViolationTarget(key), null);
+    });
+
+    it('classifies a value too large for its index, naming the index while Postgres does', async () => {
+      await dialect.schemaTransaction(db, (tx) =>
+        dialect.applyTableDiff(tx, {
+          kind: 'create',
+          table: table('Notes', {
+            columns: [
+              { name: 'UUID', type: 'text', notNull: true },
+              { name: 'body', type: 'text', notNull: false },
+            ],
+            primaryKey: ['UUID'],
+            indexes: [{ name: 'IX__Notes__body', columns: ['body'] }],
+          }),
+        }),
+      );
+      const big = await rejection(
+        db.run('INSERT INTO "Notes" VALUES (?, ?)', ['n1', randomBytes(3000).toString('base64')]),
+      );
+      ok(dialect.isIndexOverflow(big));
+      ok(!dialect.isUniqueViolation(big));
+      deepStrictEqual(dialect.indexViolationTarget(big), { table: 'Notes', columns: ['body'] });
+      const huge = await rejection(
+        db.run('INSERT INTO "Notes" VALUES (?, ?)', [
+          'n2',
+          randomBytes(100_000).toString('base64'),
+        ]),
+      );
+      ok(dialect.isIndexOverflow(huge));
+      strictEqual(dialect.indexViolationTarget(huge), null);
     });
 
     describe('schemaTransaction', () => {

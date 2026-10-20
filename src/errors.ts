@@ -1,4 +1,4 @@
-import { isObject, isString } from 'ohnejs/utils';
+import { isObject, isString, isUndefined } from 'ohnejs/utils';
 
 /**
  * A row duplicates a unique index or the primary key.
@@ -9,6 +9,11 @@ export const UNIQUE_VIOLATION = '23505';
  * A write breaks a foreign key, on insert or on a restricted delete.
  */
 export const FOREIGN_KEY_VIOLATION = '23503';
+
+/**
+ * A value outgrew a fixed limit, such as the size of an index entry.
+ */
+export const PROGRAM_LIMIT_EXCEEDED = '54000';
 
 /**
  * A statement ran after an earlier one failed, so the transaction can only roll back.
@@ -51,8 +56,8 @@ export function sqlstateOf(error: unknown): string | undefined {
 }
 
 /**
- * The columns of the unique index a unique violation names, read back from `error.constraint`.
- * The name is `UX__<table>__<columns>` with the columns joined by `_`.
+ * The columns of the index a failed write names, read back from `error.constraint`.
+ * The name is `UX__<table>__<columns>` for a unique index, `IX__` for a plain one, the columns joined by `_`.
  * An empty piece therefore marks an internal column, which starts with `_`.
  * Field columns are camelCase, so the split is unambiguous.
  * The parse counts only when the columns rebuild the exact name.
@@ -74,8 +79,10 @@ export function constraintColumns(error: unknown): string[] | null {
   if (!isObject(error)) return null;
   const { table, constraint } = error;
   if (!isString(table) || !isString(constraint) || constraint.includes('$')) return null;
-  const prefix = `UX__${table}__`;
-  if (!constraint.startsWith(prefix)) return null;
+  const prefix = ['UX__', 'IX__']
+    .map((kind) => `${kind}${table}__`)
+    .find((candidate) => constraint.startsWith(candidate));
+  if (isUndefined(prefix)) return null;
   const columns: string[] = [];
   let internal = '';
   for (const piece of constraint.slice(prefix.length).split('_')) {

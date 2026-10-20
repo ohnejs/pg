@@ -124,6 +124,9 @@ Without the grants, the sync fails at boot with an error that names the missing 
   write that was rolled back never reports success. SQLite carries on. Let the error throw, or
   avoid it in SQL, for example with `ON CONFLICT DO NOTHING`.
 - **Text cannot hold U+0000.** Writing a NUL character to a text field fails with `22021`.
+- **An indexed value has a size limit.** A field with `index` or `unique`, or in a composite index,
+  refuses a value too large for a Postgres index entry, about 2.7 kB, with
+  `validation.tooLargeToIndex`. SQLite has no limit. Set `max` on the field, or drop the index.
 - **List filters need a JSON array.** An `includes`, `includesAny`, or `includesAll` filter fails
   with `22023` on a stored value that is not an array, where SQLite treats it as a list of one.
   ohne's own writes always store an array, so only rows you wrote with raw SQL can hit this.
