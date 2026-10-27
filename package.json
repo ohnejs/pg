@@ -1,6 +1,6 @@
 {
   "name": "@ohnejs/pg",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Postgres for the ohne database.",
   "homepage": "https://ohne.dev/docs/database/engine#postgres",
   "license": "MIT",
@@ -37,13 +37,13 @@
   "devDependencies": {
     "@types/node": "26.6.5",
     "@types/pg": "8.23.1",
-    "ohnejs": "0.5.1",
+    "ohnejs": "0.6.0",
     "oxfmt": "0.74.0",
     "oxlint": "1.89.0",
     "typescript": "7.0.2"
   },
   "peerDependencies": {
-    "ohnejs": ">=0.3.0 <0.6.0-0"
+    "ohnejs": ">=0.3.0 <0.7.0-0"
   },
   "engines": {
     "node": ">=26.0.0"
