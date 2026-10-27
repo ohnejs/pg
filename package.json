@@ -37,7 +37,7 @@
   "devDependencies": {
     "@types/node": "26.0.0",
     "@types/pg": "8.23.1",
-    "ohnejs": "0.5.0",
+    "ohnejs": "0.5.1",
     "oxfmt": "0.55.0",
     "oxlint": "1.70.0",
     "typescript": "7.0.2"
